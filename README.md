@@ -1,6 +1,8 @@
 # Mode 3 Without the Cloud: An OpenBao Variant
 
-The Mode 3 pattern from [part 2](https://github.com/christian-posta/christian-posta.github.io/blob/ceposta-cb4a-part2/_posts/2026-08-04-credential-brokering-patterns-for-ai-agent-egress-part2.md) also works fully open source and cloud-agnostic, and it gets simpler, because the component you built by hand already exists inside [OpenBao](https://openbao.org/). It follows the diagram I sent you before.
+The Mode 3 pattern from [part 2](https://github.com/christian-posta/christian-posta.github.io/blob/ceposta-cb4a-part2/_posts/2026-08-04-credential-brokering-patterns-for-ai-agent-egress-part2.md) also works fully open source and cloud-agnostic, and it gets simpler, because the component you built by hand already exists inside [OpenBao](https://openbao.org/). It follows this architecture:
+
+![Architecture: an AI agent calls agentgateway with a SPIFFE ID and no secret. The gateway asks a PDP for authorization, then either mints a short-lived dynamic secret from OpenBao (120s lease, revoked after the call) or fetches an encrypted per-user token row and unwraps it through OpenBao Transit with a one-time authorization. The gateway injects the credential, calls the upstream (DB, cloud, internal API, GitHub, Slack, JIRA), returns the response to the agent without any credential, and sends spans and decision logs to OTel.](architecture.png)
 
 As of this writing (mid-2026), I ran everything below on OpenBao 2.4 in dev mode and checked each mechanism against the official docs, linked where it first shows up.
 
