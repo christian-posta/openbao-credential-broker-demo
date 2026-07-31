@@ -4,7 +4,7 @@ The Mode 3 pattern from [part 2](https://github.com/christian-posta/christian-po
 
 ![Architecture: an AI agent calls agentgateway with a SPIFFE ID and no secret. The gateway asks a PDP for authorization, then either mints a short-lived dynamic secret from OpenBao (120s lease, revoked after the call) or fetches an encrypted per-user token row and unwraps it through OpenBao Transit with a one-time authorization. The gateway injects the credential, calls the upstream (DB, cloud, internal API, GitHub, Slack, JIRA), returns the response to the agent without any credential, and sends spans and decision logs to OTel.](architecture.png)
 
-As of this writing (mid-2026), I ran everything below on OpenBao 2.4 in dev mode and checked each mechanism against the official docs, linked where it first shows up.
+I ran everything below on OpenBao 2.4 in dev mode and checked each mechanism against the official docs, linked where it first shows up.
 
 ## The line 26 TODO: "why a database, why not Vault/BAO?"
 
@@ -135,7 +135,7 @@ Same honesty, applied to this variant:
 
 1. **OpenBao is now the referee you must protect.** KMS gives you a managed HSM boundary for free. Here the barrier key is in the memory of a process you run. Mitigations are operational: dedicated hardened cluster, auto-unseal against an external root of trust, no shared pipeline. Your "independence is an operational claim" warning applies to OpenBao versus controller too.
 2. **The wrap-path plaintext DEK stays.** Whatever encrypts locally holds the key at that moment. Same limit, same writer-path split as the fix direction.
-3. **The gateway still sees subject tokens on live requests.** A compromised gateway can collect them and mass-login while they're valid. Short IdP TTLs, audience binding, and [login rate quotas](https://openbao.org/docs/concepts/resource-quotas/) make it detectable and slow, prevention it is not.
+3. **The gateway still sees subject tokens on live requests.** A compromised gateway can collect them and mass-login while they're valid. Short IdP TTLs, audience binding, and [login rate quotas](https://openbao.org/docs/concepts/resource-quotas/) let you see it and slow it down, but they don't prevent it.
 4. **Key count grows with users.** Key lifecycle joins the identity lifecycle. Derived contexts on a single key are the simpler variant if key sprawl worries you.
 5. **`token_num_uses=1` counts every request.** A token lookup or renew burns the use and the decrypt fails. The redeem path must be exactly 1 call.
 6. **User identifiers can leak into audit paths.** [Audit devices](https://openbao.org/docs/audit/) hash values but log paths in clear. Use a pairwise identifier or the alias-metadata templating above.
@@ -145,4 +145,4 @@ Same honesty, applied to this variant:
 
 Your post ends with 2 answers to credential concentration, topological and cryptographic. This variant adds a third axis: a referee you own versus a referee you rent. The same 3 roles (ciphertext holder, user verifier, key referee) written in OpenBao run the same on any cloud or on none, and the whole boundary is source you can inspect and config you can review. Many teams that care about agent egress are on-prem or on sovereign clouds exactly because of credential concentration fears. I think the post gets stronger if Mode 3 is a pattern with 2 reference implementations, KMS grants and vault-native tokens.
 
-If you want, I can turn this into a section for the post or a runnable demo. The negative test translates 1 to 1, I already ran it.
+The runnable version is [`demo.sh`](demo.sh) in this repo. If you want, I can turn this into a section for the post.
