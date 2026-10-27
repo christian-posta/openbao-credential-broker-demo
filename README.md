@@ -131,6 +131,8 @@ Same shape as yours, 2 identities and negative tests, run on OpenBao 2.7.2 in de
    * permission denied
 ```
 
+![demo.sh running all 11 checks on OpenBao 2.7.2](openbao-terminal-demo.gif)
+
 The component holding the ciphertext can't decrypt it with its own credentials. The capability that can is minted per verified user, dies in 60 seconds, dies on first use.
 
 ## Where this still leaks
