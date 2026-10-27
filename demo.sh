@@ -31,7 +31,8 @@ FAIL=0
 SKIP=0
 
 cleanup() {
-  [ -n "${BAO_PID:-}" ] && kill "$BAO_PID" 2>/dev/null
+  # wait so the server releases the audit file before the ram disk is ejected
+  [ -n "${BAO_PID:-}" ] && kill "$BAO_PID" 2>/dev/null && wait "$BAO_PID" 2>/dev/null
   docker rm -f "$PG_CONTAINER" >/dev/null 2>&1
   diskutil eject "$RAMDISK_VOL" >/dev/null 2>&1
   rm -rf "$WORK"
@@ -181,7 +182,7 @@ check "8 CIDR-bound role rejects wrong source IP" "permission denied" "$OUT"
 # 9) dynamic secrets: mint a 120s Postgres credential, use it, revoke it
 if docker info >/dev/null 2>&1 && command -v psql >/dev/null 2>&1; then
   docker run -d --name "$PG_CONTAINER" -e POSTGRES_USER=bao_admin \
-    -e POSTGRES_PASSWORD=adminpw -p 127.0.0.1:5499:5432 postgres:17-alpine >/dev/null
+    -e POSTGRES_PASSWORD=adminpw -p 127.0.0.1:5499:5432 postgres:18-alpine >/dev/null
   PG_UP=""
   for _ in $(seq 1 30); do
     PGPASSWORD=adminpw psql -h 127.0.0.1 -p 5499 -U bao_admin -d postgres \

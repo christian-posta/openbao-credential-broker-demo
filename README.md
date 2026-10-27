@@ -4,7 +4,7 @@ The Mode 3 pattern from [part 2](https://github.com/christian-posta/christian-po
 
 ![Architecture: an AI agent calls agentgateway with a SPIFFE ID and no secret. The gateway asks a PDP for authorization, then either mints a short-lived dynamic secret from OpenBao (120s lease, revoked after the call) or fetches an encrypted per-user token row and unwraps it through OpenBao Transit with a one-time authorization. The gateway injects the credential, calls the upstream (DB, cloud, internal API, GitHub, Slack, JIRA), returns the response to the agent without any credential, and sends spans and decision logs to OTel.](architecture.png)
 
-I ran everything below on OpenBao 2.4 in dev mode and checked each mechanism against the official docs, linked where it first shows up.
+I ran everything below on OpenBao 2.7.2 in dev mode and checked each mechanism against the official docs, linked where it first shows up.
 
 ## The line 26 TODO: "why a database, why not Vault/BAO?"
 
@@ -105,7 +105,7 @@ So your tiering knob gets a third setting: which backends need stored credential
 
 ## The proof
 
-Same shape as yours, 2 identities and negative tests, run on OpenBao 2.4 in dev mode with a local test IdP key, `token_ttl=60s`, `token_num_uses=1`, per-user derived Transit keys, and an encrypt-only controller policy. You can reproduce all 6 checks with [`demo.sh`](demo.sh) in this repo, it needs only `bao`, `openssl`, and `jq`, and runs on 127.0.0.1. Actual results:
+Same shape as yours, 2 identities and negative tests, run on OpenBao 2.7.2 in dev mode with a local test IdP key, `token_ttl=60s`, `token_num_uses=1`, per-user derived Transit keys, and an encrypt-only controller policy. You can reproduce all 6 checks with [`demo.sh`](demo.sh) in this repo, it needs only `bao`, `openssl`, and `jq`, and runs on 127.0.0.1. Actual results:
 
 ```
 1) derived context binding: decrypt alice's row with bob's context
