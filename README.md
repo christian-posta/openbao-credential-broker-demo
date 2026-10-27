@@ -42,11 +42,12 @@ Check 2, authorization, fixed at request time. The controller redeems the one-sh
 
 ```hcl
 path "transit/decrypt/user-{{identity.entity.aliases.<jwt_mount_accessor>.name}}" {
-  capabilities = ["update"]
+  capabilities       = ["update"]
+  allowed_parameters = { "ciphertext" = [], "context" = [] }
 }
 ```
 
-With 1 Transit key per user, the token only reaches the key of that verified user. That's your grant subset check. The [templated policies docs](https://openbao.org/docs/concepts/policies/) list the alias name as an injectable path parameter.
+With 1 Transit key per user, the token only reaches the key of that verified user. That's your grant subset check. `allowed_parameters` matters: without it, 1 `transit/decrypt` call with `batch_input` opens every row of that user on a single use of the one-shot token. The [templated policies docs](https://openbao.org/docs/concepts/policies/) list the alias name as an injectable path parameter.
 
 One detail, I hit it when testing. The alias name is the raw `user_claim` value, no hashing step. For your `HMAC(sub)` privacy trick, either use a pairwise subject identifier from the IdP, or map a claim into alias metadata via [`claim_mappings`](https://openbao.org/docs/auth/jwt/) and template on `{{identity.entity.aliases.<accessor>.metadata.owner}}`. Raw `sub` in key names ends up in audit log paths.
 
@@ -95,7 +96,7 @@ sequenceDiagram
 
 If anything is off, the decrypt never happens and the failure is in the audit log.
 
-Freshness comes from the same move. The one-shot token only exists because a real subject token hit the gateway seconds ago, dies in 60 seconds, and dies on first use. A captured subject token with no live request gets nothing, and your "no background refresher" rule stays. For a DPoP-style binding, [`token_bound_cidrs`](https://openbao.org/api-docs/auth/jwt/) pins the token to the controller's network identity.
+Freshness comes from the same move, on 1 condition: only the gateway can reach `auth/jwt/login`. Then the one-shot token only exists because a real subject token hit the gateway seconds ago, dies in 60 seconds, and dies on first use, and your "no background refresher" rule stays. The controller also sees the subject token (it's the token exchange input), so if it can reach the login path it can replay a captured token for as long as the IdP token lives. Lock the login path to the gateway at the network layer, e.g. mTLS or a waypoint policy on `/v1/auth/jwt/login`. [`token_bound_cidrs`](https://openbao.org/api-docs/auth/jwt/) on the role doesn't do this alone: OpenBao checks it at login and on every use (check 8), so 1 list can't say "the gateway logs in, the controller uses the token".
 
 ## The second path: stop storing what you can mint
 
@@ -105,7 +106,7 @@ So your tiering knob gets a third setting: which backends need stored credential
 
 ## The proof
 
-Same shape as yours, 2 identities and negative tests, run on OpenBao 2.7.2 in dev mode with a local test IdP key, `token_ttl=60s`, `token_num_uses=1`, per-user derived Transit keys, and an encrypt-only controller policy. You can reproduce all 6 checks with [`demo.sh`](demo.sh) in this repo, it needs only `bao`, `openssl`, and `jq`, and runs on 127.0.0.1. Actual results:
+Same shape as yours, 2 identities and negative tests, run on OpenBao 2.7.2 in dev mode with a local test IdP key, `token_ttl=60s`, `token_num_uses=1`, per-user derived Transit keys, and an encrypt-only controller policy. You can reproduce these checks, plus TTL, CIDR, dynamic secret, and audit fail-closed checks, with [`demo.sh`](demo.sh) in this repo, it needs only `bao`, `openssl`, and `jq`, and runs on 127.0.0.1. Actual results:
 
 ```
 1) derived context binding: decrypt alice's row with bob's context
@@ -125,6 +126,9 @@ Same shape as yours, 2 identities and negative tests, run on OpenBao 2.7.2 in de
 
 6) expired subject JWT at login
    * error validating token: invalid expiration time (exp) claim: token is expired
+
+10) batch_input: fresh one-shot token, 2 of alice's rows in 1 call
+   * permission denied
 ```
 
 The component holding the ciphertext can't decrypt it with its own credentials. The capability that can is minted per verified user, dies in 60 seconds, dies on first use.

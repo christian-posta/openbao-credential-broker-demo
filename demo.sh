@@ -8,14 +8,15 @@
 #   - a templated policy so a login token only reaches its own user's key
 #   - one-shot tokens: token_ttl=60s, token_num_uses=1
 #   - an encrypt-only "controller" identity
-# and runs 10 checks:
+# and runs 11 checks:
 #   1-6  the core Mode 3 properties
 #   7    token TTL expires on the wall clock
 #   8    token_bound_cidrs blocks the wrong source IP
 #   9    dynamic Postgres credentials: mint, use, revoke (needs docker + psql, skipped otherwise)
-#   10   audit fail-closed: no log, no request (needs macOS hdiutil, skipped otherwise)
+#   10   batch_input cannot stretch a one-shot token over several rows
+#   11   audit fail-closed: no log, no request (needs macOS hdiutil, skipped otherwise)
 #
-# Requirements: bao, openssl, jq. Checks 9 and 10 have extra requirements and
+# Requirements: bao, openssl, jq. Checks 9 and 11 have extra requirements and
 # report SKIP when those are missing. Everything runs on 127.0.0.1.
 
 set -u
@@ -93,9 +94,12 @@ bao auth enable jwt >/dev/null
 bao write auth/jwt/config jwt_validation_pubkeys=@"$WORK/idp.pub" >/dev/null
 ACCESSOR=$(bao auth list -format=json | jq -r '.["jwt/"].accessor')
 
+# allowed_parameters denies everything else, batch_input included, so a
+# one-shot token opens exactly one row
 cat >"$WORK/decrypt-own.hcl" <<EOF
 path "transit/decrypt/user-{{identity.entity.aliases.${ACCESSOR}.name}}" {
-  capabilities = ["update"]
+  capabilities       = ["update"]
+  allowed_parameters = { "ciphertext" = [], "context" = [] }
 }
 EOF
 bao policy write decrypt-own "$WORK/decrypt-own.hcl" >/dev/null
@@ -125,6 +129,10 @@ CT_A=$(bao write -field=ciphertext transit/encrypt/user-alice \
   plaintext=$(printf 'alice-github-token' | base64) context="$CTX_A")
 CT_B=$(bao write -field=ciphertext transit/encrypt/user-bob \
   plaintext=$(printf 'bob-github-token' | base64) context="$CTX_B")
+# a second row for alice, used by check 10
+CTX_A2=$(printf 'alice|row-789' | base64)
+CT_A2=$(bao write -field=ciphertext transit/encrypt/user-alice \
+  plaintext=$(printf 'alice-slack-token' | base64) context="$CTX_A2")
 
 echo "== checks"
 
@@ -222,7 +230,15 @@ else
   skip "9 dynamic Postgres credential cycle" "needs a running docker daemon and psql"
 fi
 
-# 10) audit fail-closed: fill the audit disk, requests must be refused
+# 10) one request with batch_input would decrypt both of alice's rows on one use
+TOKEN4=$(bao write -field=token auth/jwt/login role=agent-egress jwt=@"$WORK/alice.jwt")
+BATCH=$(jq -nc --arg c1 "$CT_A" --arg x1 "$CTX_A" --arg c2 "$CT_A2" --arg x2 "$CTX_A2" \
+  '{batch_input: [{ciphertext: $c1, context: $x1}, {ciphertext: $c2, context: $x2}]}')
+OUT=$(printf '%s' "$BATCH" | env BAO_TOKEN="$TOKEN4" bao write transit/decrypt/user-alice - 2>&1)
+check "10 batch_input cannot stretch a one-shot token" "permission denied" "$OUT"
+
+# 11) audit fail-closed: fill the audit disk, requests must be refused; runs
+# last because the server refuses everything afterwards
 if [ "$(uname)" = "Darwin" ] && command -v hdiutil >/dev/null 2>&1; then
   RD=$(hdiutil attach -nomount ram://8192 | awk '{print $1}')
   diskutil eraseVolume HFS+ "$RAMDISK_VOL" "$RD" >/dev/null 2>&1
@@ -234,9 +250,9 @@ if [ "$(uname)" = "Darwin" ] && command -v hdiutil >/dev/null 2>&1; then
   for i in $(seq 1 40); do
     OUT=$(bao write -f transit/keys/audit-k$i type=aes256-gcm96 2>&1) || break
   done
-  check "10 fail-closed: request refused when audit cannot write" "internal error" "$OUT"
+  check "11 fail-closed: request refused when audit cannot write" "internal error" "$OUT"
 else
-  skip "10 audit fail-closed" "needs macOS hdiutil for the ram disk"
+  skip "11 audit fail-closed" "needs macOS hdiutil for the ram disk"
 fi
 
 echo
